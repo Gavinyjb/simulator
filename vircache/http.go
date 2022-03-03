@@ -17,13 +17,15 @@ const (
 )
 
 // HTTPPool implements PeerPicker for a pool of HTTP peers.
+// HTTPPool，作为承载节点间 HTTP 通信的核心数据结构
 type HTTPPool struct {
 	// this peer's base URL, e.g. "https://example.net:8000"
-	self        string
-	basePath    string
-	mu          sync.Mutex // guards peers and httpGetters
-	peers       *consistenthash.Map
-	httpGetters map[string]*httpGetter // keyed by e.g. "http://10.0.0.2:8008"
+	self     string              // 用来记录自己的地址，包括主机名/IP 和端口。
+	basePath string              // 作为节点的通讯地址前缀，方便节点访问
+	mu       sync.Mutex          // guards peers and httpGetters
+	peers    *consistenthash.Map // 作为节点的通讯地址前缀，方便节点访问
+	// 每一个远程节点对应一个 httpGetter，因为 httpGetter 与远程节点的地址 baseURL 有关。
+	httpGetters map[string]*httpGetter // 映射远程节点与对应的 httpGetter   keyed by e.g. "http://10.0.0.2:8008"
 }
 
 // NewHTTPPool initializes an HTTP pool of peers.
@@ -72,6 +74,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Set updates the pool's list of peers.
+// Set 实例化一致性哈希， 添加传入节点
 func (p *HTTPPool) Set(peers ...string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -84,6 +87,7 @@ func (p *HTTPPool) Set(peers ...string) {
 }
 
 // PickPeer picks a peer according to key
+// PickPeer 包装了一致性哈希算法的 Get() 方法，根据具体的 key，选择节点，返回节点对应的 HTTP 客户端。
 func (p *HTTPPool) PickPeer(key string) (PeerGetter, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -96,18 +100,20 @@ func (p *HTTPPool) PickPeer(key string) (PeerGetter, bool) {
 
 var _ PeerPicker = (*HTTPPool)(nil)
 
+// 创建具体的 HTTP 客户端类 httpGetter
 type httpGetter struct {
-	baseURL string
+	baseURL string // baseURL 表示将要访问的远程节点的地址，例如 http://example.com/_geecache/。
 }
 
 func (h *httpGetter) Get(group string, key string) ([]byte, error) {
 	u := fmt.Sprintf(
 		"%v%v/%v",
 		h.baseURL,
+		// QueryEscape 函数对s进行转码使之可以安全的用在URL查询里。
 		url.QueryEscape(group),
 		url.QueryEscape(key),
 	)
-	res, err := http.Get(u)
+	res, err := http.Get(u) // 获取返回值
 	if err != nil {
 		return nil, err
 	}
